@@ -1,0 +1,20 @@
+# Ignore R and RStudio files
+*.Rproj
+.Rhistory
+.RData
+.Ruserdata
+
+# Ignore data files 
+data/embeddings/glove.6B.100d.txt
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore output files
+output/
+*.html
+*.pdf
+*.png
+*.jpg
+*.svg
