@@ -1,0 +1,164 @@
+---
+title: Analyzing Lexical and Semantic Patterns in the Lyrics of Billie Eilish's Album
+  Hit Me Hard and Soft
+author:
+  name: BAKINA Diana
+  affiliation: Université Paris Cité
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_depth: '6'
+    df_print: paged
+  html_notebook:
+    highlight: pygments
+    number_sections: yes
+    toc: yes
+    toc_depth: 6
+    toc_float:
+      collapsed: yes
+      fig_crop: no
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+# Set up global chunk options to prevent specific errors and ensure reproducibility
+knitr::opts_chunk$set(dev = "png", echo = TRUE)
+options(bitmapType = "cairo")
+```
+
+# Loading packages
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(quanteda)
+library(wordcloud)
+library(RColorBrewer)
+library(quanteda.textplots)
+library(ggplot2)
+library(text2vec)
+library(data.table)
+library(quanteda.textstats)
+library(here)  # Ensure universal paths
+```
+
+# Introduction
+This project analyzes the lyrics of Billie Eilish's album *Hit Me Hard and Soft* using R. The analysis includes tokenization, cleaning, corpus manipulation, and visualization to identify frequent words, create word clouds, and explore textual similarities.
+
+## Data Source
+The lyrics were sourced from the album page on Genius.com: [Billie Eilish - Hit Me Hard and Soft](https://genius.com/albums/Billie-eilish/Hit-me-hard-and-soft). Each song's lyrics were manually extracted and saved as individual text files for further analysis.
+
+## Research Questions
+- What are the most frequently used words in the album's lyrics?
+- What themes emerge from high-frequency words and semantic similarities across the songs?
+
+# Data Import and Preparation
+```{r}
+# Define the path to the lyrics folder within the repository
+path <- here("data", "lyrics")
+```
+
+# Reading text files and cleaning lyrics by removing text enclosed in square brackets (e.g., [chorus]).
+# Combining the lines of each song into a single string for further analysis.
+```{r}
+files <- list.files(path, pattern = "\\.txt$", full.names = TRUE)
+
+# Function to remove text enclosed in square brackets
+remove_square_brackets <- function(text) {
+  gsub("\\[.*?\\]", "", text)
+}
+
+# Read song lyrics and clean them
+songs <- tibble(
+  name = tools::file_path_sans_ext(basename(files)),
+  text = map_chr(files, ~ {
+    raw_text <- readLines(.x, encoding = "UTF-8") %>% 
+      paste(collapse = " ") %>%
+      iconv(from = "UTF-8", to = "ASCII//TRANSLIT")
+    remove_square_brackets(raw_text)
+  })
+)
+```
+
+# Creating a corpus for text analysis
+```{r}
+song_corpus <- corpus(songs, text_field = "text")
+```
+
+# Tokenizing and cleaning text
+```{r}
+tokens_clean <- tokens(
+  song_corpus, 
+  remove_punct = TRUE, 
+  remove_symbols = TRUE, 
+  remove_numbers = TRUE
+) %>%
+  tokens_tolower() %>%
+  tokens_select(
+    pattern = c(stopwords("en", source = "stopwords-iso"), 
+                c("uh", "huh", "ah", "ooh", "hm", "yeah", "ha", "na", "mmm", "bum", 
+                  "la", "mm-mm", "hmm", "Ah-ah", "Ooh-ooh", "gonna", "wanna", 
+                  "takin", "Ah-ah-ah", "ya", "Hm-hm", "Yup", "bout")),
+    selection = "remove"
+  )
+```
+
+# Convert tokens back to cleaned text and save as CSV
+```{r}
+songs_cleaned <- tibble(
+  name = docnames(song_corpus),
+  cleaned_text = map_chr(as.list(tokens_clean), ~ {
+    text <- paste(.x, collapse = " ")
+    text <- gsub("(\\b.+?\\b)( \\1)+", "\\1", text)  # Remove duplicate phrases
+    text <- gsub("\\b(\\w+)\\b(\\s+\\1\\b)+", "\\1", text)  # Remove repeated words
+    gsub("\\b\\d{3}-\\d{3}-\\d{4}\\b|\\b\\d+\\b", "", text)  # Remove phone numbers and numeric values
+  })
+)
+
+# Save cleaned lyrics to a CSV file in the repository
+write_csv(songs_cleaned, here("data", "processed", "billie_eilish_songs_cleaned.csv"))
+```
+
+# Create a cleaned corpus
+```{r}
+cleaned_corpus <- corpus(songs_cleaned, text_field = "cleaned_text")
+```
+
+# Assign document names and metadata
+```{r}
+docnames(cleaned_corpus) <- songs$name
+docnames(cleaned_corpus) <- iconv(docnames(cleaned_corpus), from = "UTF-8", to = "ASCII//TRANSLIT")
+docvars(cleaned_corpus, "name") <- docnames(cleaned_corpus)
+```
+
+# Adding song duration metadata
+```{r}
+song_durations_sec <- c(
+  210, 298, 343, 303, 186, 333, 179, 219, 293, 261
+)
+docvars(cleaned_corpus, "dur_sec") <- song_durations_sec
+```
+
+# Generate summary of the cleaned corpus
+```{r}
+summary(cleaned_corpus)
+```
+
+# Save song statistics in a CSV file
+```{r}
+song_stats <- data.frame(
+  song = docnames(cleaned_corpus),
+  total_words = ntoken(cleaned_corpus),
+  unique_words = sapply(as.character(cleaned_corpus), function(x) length(unique(strsplit(x, " ")[[1]])))
+) %>%
+  mutate(
+    percent_unique = round((unique_words / total_words) * 100, 2),
+    duration_sec = docvars(cleaned_corpus, "dur_sec"),
+    duration_min = duration_sec / 60,
+    words_per_minute = round(total_words / duration_min, 2)
+  )
+
+# Save song statistics to a CSV file
+write_csv(song_stats, here("data", "processed", "song_statistics.csv"))
+```
